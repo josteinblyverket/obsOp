@@ -18,8 +18,8 @@ import torchsummary
 import torch_geometric
 import numpy as np
 
-from Data_generator_GNN_prediction import *
-from GNN_GAT import *
+from obsOp.Data_generator_GNN_prediction import *
+from obsOp.GNN_GAT import *
 
 # In[2]:
 
