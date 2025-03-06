@@ -337,60 +337,6 @@ class gridding_predictions():
 # In[11]:
 
 
-tt0 = time.time()
-#
-Surfex_coord = get_surfex_coordinates(paths)()
-#
-checkpoint = torch.load(paths["model"] + "GNN_model_" + AMSR2_frequency.split('.')[0] + "GHz.pth", weights_only = False) 
-#
-normalization_stats, model_params = make_model_parameters(AMSR2_frequency = AMSR2_frequency, 
-                                                          filename_normalization = filename_normalization, 
-                                                          predictors = predictors, 
-                                                          activation = activation, 
-                                                          weight_initializer = weight_initializer, 
-                                                          conv_filters = conv_filers, 
-                                                          batch_normalization = batch_normalization,
-                                                          attention_heads = attention_heads)()
-#
-list_dates = make_list_dates(date_min, date_max)
-for date_task in list_dates:
-    #try:
-        Number_of_graphs, Graphs_coord, Targets, valid_loader = make_loader(AMSR2_frequency = AMSR2_frequency,
-                                                                            AMSR2_footprint_radius = AMSR2_footprint_radius, 
-                                                                            list_predictors = model_params["list_predictors"], 
-                                                                            normalization_stats = normalization_stats,
-                                                                            date_task = date_task,
-                                                                            paths = paths)()
-        #
-        GNN_model = GNN_GAT(**model_params).to(device)
-        GNN_model.load_state_dict(checkpoint["model_state_dict"])
-        #
-        print("Pred starts")
-        t0 = time.time()
-        predictions = make_predictions(list_targets = model_params["list_targets"], 
-                                    model = GNN_model, 
-                                    valid_loader = valid_loader, 
-                                    paths = paths, 
-                                    normalization_stats = normalization_stats, 
-                                    device = device)()
-        #
-        print("Pred OK")
-        t1 = time.time()
-        print(date_task, t1 - t0)
-        #
-        gridding_predictions(date_task = date_task, 
-                            AMSR2_footprint_radius = AMSR2_footprint_radius,
-                            Surfex_coord = Surfex_coord, 
-                            list_targets = model_params["list_targets"], 
-                            Targets = Targets, 
-                            Graphs_coord = Graphs_coord, 
-                            predictions = predictions, 
-                            paths = paths)()
-    #except:
-    #   pass
-#
-ttf = time.time()
-print("Total computing time: ", ttf - tt0)
 
 def main():
 
@@ -448,6 +394,62 @@ def main():
     predictors["HSN_VEG"] = [1, 6, 12]
     predictors["SNOWTEMP"] = [1, 6, 12]
     predictors["SNOWLIQ"] = [1, 6, 12]
+
+
+    tt0 = time.time()
+    #
+    Surfex_coord = get_surfex_coordinates(paths)()
+    #
+    checkpoint = torch.load(paths["model"] + "GNN_model_" + AMSR2_frequency.split('.')[0] + "GHz.pth", weights_only = False) 
+    #
+    normalization_stats, model_params = make_model_parameters(AMSR2_frequency = AMSR2_frequency, 
+                                                              filename_normalization = filename_normalization, 
+                                                              predictors = predictors, 
+                                                              activation = activation, 
+                                                              weight_initializer = weight_initializer, 
+                                                              conv_filters = conv_filers, 
+                                                              batch_normalization = batch_normalization,
+                                                              attention_heads = attention_heads)()
+    #
+    list_dates = make_list_dates(date_min, date_max)
+    for date_task in list_dates:
+        #try:
+            Number_of_graphs, Graphs_coord, Targets, valid_loader = make_loader(AMSR2_frequency = AMSR2_frequency,
+                                                                                AMSR2_footprint_radius = AMSR2_footprint_radius, 
+                                                                                list_predictors = model_params["list_predictors"], 
+                                                                                normalization_stats = normalization_stats,
+                                                                                date_task = date_task,
+                                                                                paths = paths)()
+            #
+            GNN_model = GNN_GAT(**model_params).to(device)
+            GNN_model.load_state_dict(checkpoint["model_state_dict"])
+            #
+            print("Pred starts")
+            t0 = time.time()
+            predictions = make_predictions(list_targets = model_params["list_targets"], 
+                                        model = GNN_model, 
+                                        valid_loader = valid_loader, 
+                                        paths = paths, 
+                                        normalization_stats = normalization_stats, 
+                                        device = device)()
+            #
+            print("Pred OK")
+            t1 = time.time()
+            print(date_task, t1 - t0)
+            #
+            gridding_predictions(date_task = date_task, 
+                                AMSR2_footprint_radius = AMSR2_footprint_radius,
+                                Surfex_coord = Surfex_coord, 
+                                list_targets = model_params["list_targets"], 
+                                Targets = Targets, 
+                                Graphs_coord = Graphs_coord, 
+                                predictions = predictions, 
+                                paths = paths)()
+        #except:
+        #   pass
+    #
+    ttf = time.time()
+    print("Total computing time: ", ttf - tt0)    
 
 
 if __name__ == "__main__":
