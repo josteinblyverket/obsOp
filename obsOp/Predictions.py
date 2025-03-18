@@ -23,8 +23,6 @@ from obsOp.GNN_GAT import *
 
 # In[2]:
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # Check if a GPU is available
-print("Using device: "  + str(device))
 
 # # Constants
 
@@ -83,8 +81,6 @@ class get_surfex_coordinates():
 
 # # Make model parameters
 
-
-
 class make_model_parameters():
     def __init__(self, AMSR2_frequency, filename_normalization, predictors, activation, weight_initializer, conv_filters, batch_normalization, attention_heads):
         self.AMSR2_frequency = AMSR2_frequency
@@ -141,14 +137,15 @@ class make_model_parameters():
 
 
 class make_loader():
-    def __init__(self, AMSR2_frequency, AMSR2_footprint_radius, list_predictors, normalization_stats, date_task, paths):
+    def __init__(self, AMSR2_frequency, AMSR2_footprint_radius, list_predictors, normalization_stats, date_task, paths, mbr):
         self.AMSR2_frequency = AMSR2_frequency
         self.AMSR2_footprint_radius = AMSR2_footprint_radius 
         self.list_predictors = list_predictors
         self.normalization_stats = normalization_stats
         self.date_task = date_task
         self.paths = paths
-        self.filename_data = self.paths["training"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + date_task[6:8] + "/" + "03" + "/" + "001" + "/" + "Graphs_" + self.date_task + ".h5"
+        self.mbr = mbr
+        self.filename_data = self.paths["training"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + self.date_task[6:8] + "/" + "03" + "/" + "%s"%self.mbr + "/" + "Graphs_" + self.date_task + ".h5"
     #
     def Number_of_samples_and_footprint_coordinates(self):
         Graphs_coord = {}
@@ -233,20 +230,27 @@ class make_predictions():
 
 
 class gridding_predictions():
-    def __init__(self, date_task, AMSR2_footprint_radius, Surfex_coord, list_targets, Targets, Graphs_coord, predictions, paths):
+    def __init__(self, date_task, AMSR2_footprint_radius, Surfex_coord, list_targets, Targets, Graphs_coord, predictions, paths, mbr):
         self.date_task = date_task
         self.AMSR2_footprint_radius = AMSR2_footprint_radius 
         self.Surfex_coord = Surfex_coord
         self.list_targets = list_targets
         self.idx_nan = np.logical_or(np.isnan(Graphs_coord["xx"]) == True, np.isnan(Graphs_coord["yy"]) == True)
+        print("sum")
+        print(np.sum(self.idx_nan))
         self.idx_nan_extend = np.repeat(np.expand_dims(self.idx_nan, axis = 1), len(self.list_targets), axis = 1)
         self.Targets = Targets
         for var in self.Targets:
             self.Targets[var] = self.Targets[var][self.idx_nan == False]
         self.Graphs_xx = Graphs_coord["xx"][self.idx_nan == False]
         self.Graphs_yy = Graphs_coord["yy"][self.idx_nan == False]
-        self.predictions = predictions[self.idx_nan_extend == False]
+        print("here2")
+        print(np.shape(self.idx_nan_extend))
+        self.predictions = predictions#[self.idx_nan_extend == False]
+        print("here3")
+        print(np.shape(self.predictions))
         self.paths = paths
+        self.mbr = mbr
     #
     def nearest_neighbor_indexes(self):
         pred_xx = np.expand_dims(self.Graphs_xx, axis = 1)
@@ -272,8 +276,12 @@ class gridding_predictions():
             Gridded_targets[var][Gridded_distance > self.AMSR2_footprint_radius] = np.nan
         #
         Gridded_predictions = {}
+        print(np.shape((self.predictions)))
         for vi, var in enumerate(self.list_targets):
-            Pred_interp = np.ndarray.flatten(predictions[:, vi])[idx]
+            print(np.shape((self.predictions)))
+            print(np.shape(idx))
+            #Pred_interp = np.ndarray.flatten(self.predictions[:, vi])[idx]
+            Pred_interp = (self.predictions[:, vi])[idx]
             Gridded_predictions[var] = np.reshape(Pred_interp, (len(self.Surfex_coord["y"]), len(self.Surfex_coord["x"])), order = "C")
             Gridded_predictions[var][Gridded_distance > self.AMSR2_footprint_radius] = np.nan
         #
@@ -282,7 +290,7 @@ class gridding_predictions():
         return(Gridded_predictions, Gridded_targets, Gridded_distance)
     #
     def write_netCDF(self, Gridded_predictions, Gridded_targets, Gridded_distance):
-        path_output = self.paths["output"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + date_task[6:8] + "/" + "03" + "/" + "001" + "/"
+        path_output = self.paths["output"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + self.date_task[6:8] + "/" + "03" + "/" + "%s"%self.mbr + "/"
         if os.path.exists(path_output) == False:
             os.system("mkdir -p " + path_output)
         output_filename = path_output + "Predictions_" + self.date_task + ".nc"
@@ -338,8 +346,11 @@ class gridding_predictions():
 
 
 
-def main():
+def run_GNN(mbr, dtg_start, dtg_stop):
 
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # Check if a GPU is available
+    print("Using device: "  + str(device))
 
     experiment_name = "v6"
     AMSR2_frequency = "18.7"
@@ -355,6 +366,8 @@ def main():
     paths["output"] = "/lustre/storeB/users/josteinbl/sfx_data/LDAS_NOR_LETKF/archive/" #+ "/Predictions_" + AMSR2_frequency.split('.')[0] + "GHz/"
     #
     filename_normalization = paths["normalization"] + "Stats_normalization_20200901_20220531.h5"
+
+    print("INSIDE HERE")
     #
     for var in paths:
         if os.path.isdir(paths[var]) == False:
@@ -366,8 +379,8 @@ def main():
 
     # # Model parameters
 
-    date_min = "20220704"
-    date_max = "20220705"
+    date_min = dtg_start #"20220704"
+    date_max = dtg_stop #"20220704"
     subsampling = "1"
     #
     def he_normal_init(weight):
@@ -412,6 +425,7 @@ def main():
                                                               attention_heads = attention_heads)()
     #
     list_dates = make_list_dates(date_min, date_max)
+    print(list_dates)
     for date_task in list_dates:
         #try:
             Number_of_graphs, Graphs_coord, Targets, valid_loader = make_loader(AMSR2_frequency = AMSR2_frequency,
@@ -419,7 +433,8 @@ def main():
                                                                                 list_predictors = model_params["list_predictors"], 
                                                                                 normalization_stats = normalization_stats,
                                                                                 date_task = date_task,
-                                                                                paths = paths)()
+                                                                                paths = paths,
+                                                                                mbr = mbr)()
             #
             GNN_model = GNN_GAT(**model_params).to(device)
             GNN_model.load_state_dict(checkpoint["model_state_dict"])
@@ -437,6 +452,9 @@ def main():
             t1 = time.time()
             print(date_task, t1 - t0)
             #
+            print("shape predictions")
+            print(np.shape(predictions))
+
             gridding_predictions(date_task = date_task, 
                                 AMSR2_footprint_radius = AMSR2_footprint_radius,
                                 Surfex_coord = Surfex_coord, 
@@ -444,7 +462,8 @@ def main():
                                 Targets = Targets, 
                                 Graphs_coord = Graphs_coord, 
                                 predictions = predictions, 
-                                paths = paths)()
+                                paths = paths,
+                                mbr = mbr)()
         #except:
         #   pass
     #

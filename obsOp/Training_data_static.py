@@ -330,7 +330,7 @@ class read_AMSR2_data():
 
 
 class extract_graphs():
-    def __init__(self, date_task, paths, AMSR2_task_frequency, static_dimension, crs, Surfex_coord, Surfex_data, MEPS_data):
+    def __init__(self, date_task, paths, AMSR2_task_frequency, static_dimension, crs, Surfex_coord, Surfex_data, MEPS_data,mbr):
         self.date_task = date_task
         self.paths = paths
         self.AMSR2_task_frequency = AMSR2_task_frequency
@@ -339,6 +339,7 @@ class extract_graphs():
         self.Surfex_coord = Surfex_coord
         self.Surfex_data = Surfex_data
         self.MEPS_data = MEPS_data
+        self.mbr = mbr
         self.min_number_of_obs = 100
         self.max_hour = 6 # 6 AM
         self.transform_to_surfex = pyproj.Transformer.from_crs(self.crs["latlon"], self.Surfex_coord["crs"], always_xy = True)
@@ -365,7 +366,7 @@ class extract_graphs():
     #
     def calculate_distances(self, AMSR2_surfex_domain):
         AMSR2_grid_points = np.stack([AMSR2_surfex_domain["xx"], AMSR2_surfex_domain["yy"]], axis = 1)
-        Surfex_grid_points = np.stack([np.ndarray.flatten(Surfex_coord["xx"]), np.ndarray.flatten(self.Surfex_coord["yy"])], axis = 1)
+        Surfex_grid_points = np.stack([np.ndarray.flatten(self.Surfex_coord["xx"]), np.ndarray.flatten(self.Surfex_coord["yy"])], axis = 1)
         Distances_to_footprint_center = scipy.spatial.distance.cdist(AMSR2_grid_points, Surfex_grid_points, metric = "euclidean")
         return(Distances_to_footprint_center)
     #
@@ -408,8 +409,8 @@ class extract_graphs():
                             Graphs["AMSR2_" + var] = np.concatenate((Graphs["AMSR2_" + var], np.expand_dims(AMSR2_surfex_domain[var][i], axis = 0)), axis = 0)
         return(Graphs)    
     #
-    def write_graphs(self, Graphs, mbr):
-        path_output = self.paths["output"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + date_task[6:8] + "/" + date_task[9:11] + "/" + "03" + "/" + "%s"%mbr + "/"
+    def write_graphs(self, Graphs):
+        path_output = self.paths["output"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + self.date_task[6:8] + "/" + self.date_task[9:11] + "/" + "03" + "/" + "%s"%self.mbr + "/"
         print(path_output)
         if os.path.exists(path_output) == False:
             os.system("mkdir -p " + path_output) 
@@ -436,7 +437,7 @@ class extract_graphs():
                     print(filename)
                     Distances_to_footprint_center =  self.calculate_distances(AMSR2_surfex_domain)
                     Graphs = self.get_graph_data(Distances_to_footprint_center, AMSR2_surfex_domain)
-                    self.write_graphs(Graphs, mbr)
+                    self.write_graphs(Graphs)
 
 
 # # Data processing
@@ -444,14 +445,14 @@ class extract_graphs():
 # In[49]:
 
 
-def main():
+def makeData(mbr, date_start, date_stop):
 
     # # Constants
     
     SGE_TASK_ID = 1
     #
-    date_min = "20220704"
-    date_max = "20220705"
+    date_min = date_start #"20220704"
+    date_max = date_stop #"20220705"
     #
     AMSR2_task_frequency = "18.7"
     AMSR2_frequencies = ["6.9", "7.3", "10.7", "18.7", "23.8", "36.5"]
@@ -507,33 +508,39 @@ def main():
     #
     Surfex_coord, Surfex_PGD = get_surfex_coordinates(crs, surfex_PGD_variables, paths)()
 
-    mbrs = ["003"]#, "001"]#,"002","003","004","005","006","007","008", "009"]
+ #   mbrs = ["003"]#, "001"]#,"002","003","004","005","006","007","008", "009"]
 
     MEPS_data = get_MEPS_data(date_task, MEPS_leadtime, MEPS_dim_variables, MEPS_PL_variables, Surfex_coord, crs, paths)()        
 
-    for mbr in mbrs:
+#    for mbr in mbrs:
 
-        Surfex_data = read_surfex_data(date_task_hours_AMSR2, paths, predictor_variables, mbr)
-        Surfex_data["WSN_T_ISBA"] = calculate_WSN_T_ISBA(Surfex_data, n_soil_layers)
-        Surfex_data["FRAC_LAND_AND_SEA_WATER"] = Surfex_data["FRAC_WATER"] + Surfex_data["FRAC_SEA"] 
-        Surfex_data["SNOW_GRADIENT"] = (Surfex_data["SNOWTEMP12_ga"] - Surfex_data["SNOWTEMP1_ga"]) / Surfex_data["DSN_T_ISBA"]
-        Surfex_data["SNOW_GRADIENT"][Surfex_data["SNOW_GRADIENT"] > 50] = 50
-        Surfex_data["SNOW_GRADIENT"][Surfex_data["SNOW_GRADIENT"] < -50] = -50
-        for var in Surfex_PGD:
-            Surfex_data[var] = Surfex_PGD[var]
-        
-        extract_graphs(date_task = date_task, 
-                       paths = paths, 
-                       AMSR2_task_frequency = AMSR2_task_frequency, 
-                       static_dimension = static_dimension,
-                       crs = crs,
-                       Surfex_coord = Surfex_coord, 
-                       Surfex_data = Surfex_data,
-                       MEPS_data = MEPS_data)()
+    Surfex_data = read_surfex_data(date_task_hours_AMSR2, paths, predictor_variables, mbr)
+    Surfex_data["WSN_T_ISBA"] = calculate_WSN_T_ISBA(Surfex_data, n_soil_layers)
+    Surfex_data["FRAC_LAND_AND_SEA_WATER"] = Surfex_data["FRAC_WATER"] + Surfex_data["FRAC_SEA"] 
+    Surfex_data["SNOW_GRADIENT"] = (Surfex_data["SNOWTEMP12_ga"] - Surfex_data["SNOWTEMP1_ga"]) / Surfex_data["DSN_T_ISBA"]
+    Surfex_data["SNOW_GRADIENT"][Surfex_data["SNOW_GRADIENT"] > 50] = 50
+    Surfex_data["SNOW_GRADIENT"][Surfex_data["SNOW_GRADIENT"] < -50] = -50
+    for var in Surfex_PGD:
+        Surfex_data[var] = Surfex_PGD[var]
+    
+    extract_graphs(date_task = date_task, 
+                   paths = paths, 
+                   AMSR2_task_frequency = AMSR2_task_frequency, 
+                   static_dimension = static_dimension,
+                   crs = crs,
+                   Surfex_coord = Surfex_coord, 
+                   Surfex_data = Surfex_data,
+                   MEPS_data = MEPS_data,
+                   mbr = mbr)()
     #
     tf = time.time()
     print("Computing time: ", tf - t0)
 
+def main():
+
+    print("main")
+
+    #makeData(mbr)
 
 if __name__ == "__main__":
 
