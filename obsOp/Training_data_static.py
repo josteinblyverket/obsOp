@@ -1,19 +1,17 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-
 import os
 import time
 import glob
+import datetime
 import h5py
 import scipy
 import pyproj
 import netCDF4
-import datetime
 import pyresample
 import numpy as np
 import matplotlib.pyplot as plt
-
 
 
 def make_list_dates(date_min, date_max):
@@ -66,7 +64,8 @@ class get_surfex_coordinates():
         Surfex_PGD = self.load_PGD_variables()
         #
         Surfex_coord = {}
-        Surfex_coord["proj4_string"] = areadef.proj4_string
+        Surfex_coord["proj4_string"] = areadef.proj_str
+        Surfex_coord["areadef"] = areadef
         Surfex_coord["crs"] = areadef.crs
         Surfex_coord["lon"] = lon
         Surfex_coord["lat"] = lat
@@ -156,16 +155,20 @@ def read_surfex_data(date_task_hours_AMSR2, paths, predictor_variables, mbr):
 
 # In[45]:
 
-def calculate_WSN_T_ISBA(Surfex_data, n_soil_layers):
+def calculate_WSN_T_ISBA(Surfex_data, n_snow_layers):
+    """Compute total snow water eqiovalent
+
+    Args:
+        Surfex_data (dict): containing surfex data
+        n_snow_layers (_type_): number of snow layers
+    Returns:
+        WSN_T_ISBA (np.array): total snow water equivalent
+    """
     WSN_T_ISBA = np.zeros(np.shape(Surfex_data["WSN_VEG1_ga"]))
-    for layer in range(0, n_soil_layers):
+    for layer in range(0, n_snow_layers):
         WSN_T_ISBA = WSN_T_ISBA + Surfex_data["WSN_VEG" + str(layer + 1) + "_ga"]
     WSN_T_ISBA[WSN_T_ISBA > 1e10] = np.nan
     return(WSN_T_ISBA)
-
-# # Get MEPS variables
-
-# In[46]:
 
 
 class get_MEPS_data():
@@ -244,16 +247,11 @@ class get_MEPS_data():
         return(Dataset_on_Surfex_grid)
 
 
-# # Read AMSR2 data
-
-# In[47]:
-
-
 class read_AMSR2_data():
     def __init__(self, filename, AMSR2_task_frequency):
         self.filename = filename
         self.AMSR2_task_frequency = AMSR2_task_frequency
-    #
+    
     def decode_CoRegistrationParameter(self, Astr):
         # from https://gitlab.met.no/met/obsklim/satellitt/microwave-sdr-to-osisaf-nc/-/blob/master/microwave_to_osisaf_nc/amsr2h5_l1b_reader.py
         ch_coreg = Astr.split(',')
@@ -269,7 +267,7 @@ class read_AMSR2_data():
                 raise ValueError('Wrong format for the CoRegistration string %s (%s)' % (ch, e,))
             coreg[ch_nam] = ch_reg
         return(coreg)
-    #
+    
     def get_low_freq_latlon(self, lat89A, lon89A, A1, A2):
         # from https://gitlab.met.no/met/obsklim/satellitt/microwave-sdr-to-osisaf-nc/-/blob/master/microwave_to_osisaf_nc/amsr2h5_l1b_reader.py
         # compute lat/lon for a low-frequency channel from the 89A lat/lon
@@ -305,7 +303,7 @@ class read_AMSR2_data():
         Lat = np.arcsin(Pt[:, :, 2])
         Lon = np.arctan2(Pt[:, :, 1], Pt[:, :, 0])
         return(np.rad2deg(Lat), np.rad2deg(Lon)) 
-    #
+    
     def __call__(self):
         AMSR2_dataset = {}
         with h5py.File(self.filename, "r") as hdf:
@@ -328,48 +326,43 @@ class read_AMSR2_data():
         
         AMSR2_out_dataset = {}
 
-        lon_crop = []
-        lat_crop = []
-        tbh_crop = []
-        tbv_crop = []       
+        #swathdef = pyresample.geometry.SwathDefinition(lons = AMSR2_dataset["lon"], lats = AMSR2_dataset["lat"])
+        tic = time.time()
+        relevant = np.logical_and.reduce([
+            AMSR2_dataset["lon"] < 42.0,
+            AMSR2_dataset["lon"] > 10.0,
+            AMSR2_dataset["lat"] < 72.0,
+            AMSR2_dataset["lat"] > 65.0
+        ])
+        lon_crop = AMSR2_dataset["lon"][relevant]
+        lat_crop = AMSR2_dataset["lat"][relevant]
+        tbh_crop = AMSR2_dataset["BT" + self.AMSR2_task_frequency + "H"][relevant]
+        tbv_crop = AMSR2_dataset["BT" + self.AMSR2_task_frequency + "V"][relevant]
         
-        for i in range(len(AMSR2_dataset["lat"][:,0])):
-            for j in range(len(AMSR2_dataset["lat"][0,:])):
-            
-                if (AMSR2_dataset["lat"][i,j] < 72.0) and (AMSR2_dataset["lat"][i,j] > 65.0) and (AMSR2_dataset["lon"][i,j] < 42.0) and (AMSR2_dataset["lon"][i,j] > 10.0):
+        # Thinning 
+        #lat_new = lon_crop #[]
+        #lon_new = lat_crop #[]
+        #tbh_new = tbh_crop #[]
+        #tbv_new = tbv_crop #[]
+        #
+        #for i in range(0,len(lat_crop),5):
+
+        #    lat_new.append(lat_crop[i])
+        #    lon_new.append(lon_crop[i])
+        #    tbh_new.append(tbh_crop[i])
+        #    tbv_new.append(tbv_crop[i])            
                     
-                    lon_crop.append(AMSR2_dataset["lon"][i,j])
-                    lat_crop.append(AMSR2_dataset["lat"][i,j])
-                    tbh_crop.append(AMSR2_dataset["BT" + self.AMSR2_task_frequency + "H"][i,j])
-                    tbv_crop.append(AMSR2_dataset["BT" + self.AMSR2_task_frequency + "V"][i,j])
-
-        lat_crop = np.array(lat_crop)
-        lon_crop = np.array(lon_crop)
-        tbh_crop = np.array(tbh_crop)
-        tbv_crop = np.array(tbv_crop)
-
-        lat_new = []
-        lon_new = []
-        tbh_new = []
-        tbv_new = []
-        
-        for i in range(0,len(lat_crop),5):
-
-            lat_new.append(lat_crop[i])
-            lon_new.append(lon_crop[i])
-            tbh_new.append(tbh_crop[i])
-            tbv_new.append(tbv_crop[i])            
-                    
-        AMSR2_out_dataset["lat"] = np.array(lat_new)
-        AMSR2_out_dataset["lon"] = np.array(lon_new)
-        AMSR2_out_dataset["BT" + self.AMSR2_task_frequency + "H"] = np.array(tbh_new)
-        AMSR2_out_dataset["BT" + self.AMSR2_task_frequency + "V"] = np.array(tbv_new)        
+        AMSR2_out_dataset["lat"] = lat_crop  # np.array(lat_new)
+        AMSR2_out_dataset["lon"] = lon_crop  # np.array(lon_new)
+        AMSR2_out_dataset["BT" + self.AMSR2_task_frequency + "H"] = tbh_crop #np.array(tbh_new)
+        AMSR2_out_dataset["BT" + self.AMSR2_task_frequency + "V"] = tbv_crop #np.array(tbv_new)
                        
         if (len(lat_crop) == 0):
             print("No obs found")
             AMSR2_dataset = None
         else:
-            print("Obs found")
+            pass
+            #print("Obs found")
         
         return(AMSR2_out_dataset)
 
@@ -391,7 +384,7 @@ class extract_graphs():
         self.transform_to_surfex = pyproj.Transformer.from_crs(self.crs["latlon"], self.Surfex_coord["crs"], always_xy = True)
         self.path_date = paths["AMSR2"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + self.date_task[6:8] + "/amsr2/jaxa/"
         self.dataset = sorted(glob.glob(self.path_date + "GW1AM2_" + self.date_task + "0*.h5"))
-    #
+
     def AMSR2_on_surfex_domain(self, AMSR2_dataset):
         AMSR2_xx, AMSR2_yy = self.transform_to_surfex.transform(AMSR2_dataset["lon"], AMSR2_dataset["lat"])
         idx_x = np.logical_and(AMSR2_xx > self.Surfex_coord["x_min"], AMSR2_xx < self.Surfex_coord["x_max"])
@@ -409,16 +402,16 @@ class extract_graphs():
             AMSR2_surfex_domain["BT" + self.AMSR2_task_frequency + "H"] = AMSR2_dataset["BT" + self.AMSR2_task_frequency + "H"][idx_domain == True]
             AMSR2_surfex_domain["BT" + self.AMSR2_task_frequency + "V"] = AMSR2_dataset["BT" + self.AMSR2_task_frequency + "V"][idx_domain == True]
         return(AMSR2_surfex_domain)
-    #
+
     def calculate_distances(self, AMSR2_surfex_domain):
         AMSR2_grid_points = np.stack([AMSR2_surfex_domain["xx"], AMSR2_surfex_domain["yy"]], axis = 1)
         Surfex_grid_points = np.stack([np.ndarray.flatten(self.Surfex_coord["xx"]), np.ndarray.flatten(self.Surfex_coord["yy"])], axis = 1)
         Distances_to_footprint_center = scipy.spatial.distance.cdist(AMSR2_grid_points, Surfex_grid_points, metric = "euclidean")
         return(Distances_to_footprint_center)
-    #
+    
     def get_graph_data(self, Distances_to_footprint_center, AMSR2_surfex_domain):
         Graphs = {}
-        for i in range(0, len(AMSR2_surfex_domain["xx"])):
+        for i in range(0, len(AMSR2_surfex_domain["xx"])): # for each observation
             if (np.isnan(AMSR2_surfex_domain["BT" + self.AMSR2_task_frequency + "H"][i]) == False) and (np.isnan(AMSR2_surfex_domain["BT" + self.AMSR2_task_frequency + "V"][i]) == False):
                 Footprint_dist = np.argsort(Distances_to_footprint_center[i,:])[0:self.static_dimension]
                 xx_coord = np.ndarray.flatten(self.Surfex_coord["xx"])[Footprint_dist]
@@ -454,10 +447,44 @@ class extract_graphs():
                         if var != "N_obs":
                             Graphs["AMSR2_" + var] = np.concatenate((Graphs["AMSR2_" + var], np.expand_dims(AMSR2_surfex_domain[var][i], axis = 0)), axis = 0)
         return(Graphs)    
-    #
+
+    def get_graph_data_nn(self, nninfo, AMSR2_dataset):
+        """extract model input for each observation
+
+        Args:
+            nninfo (tuple): pyresample.kd_tree.get_neighbour_info output (valid_in, valid_out, indices, distances)
+            AMSR2_dataset (dict): dictionary with AMSR2 data
+        Returns:
+            graphs (dict): dictionary with data
+        """
+        valids = np.logical_and.reduce([~np.isnan(AMSR2_dataset["BT" + self.AMSR2_task_frequency + "H"]),
+                                        ~np.isnan(AMSR2_dataset["BT" + self.AMSR2_task_frequency + "V"]),
+                                        ~np.any(nninfo[2] == nninfo[0].shape[0], axis=1)])
+
+        graphs = {"Distance_to_footprint_center": nninfo[3][valids],
+                  "xx": self.Surfex_coord["xx"].flatten()[nninfo[2][valids]],
+                  "yy": self.Surfex_coord["yy"].flatten()[nninfo[2][valids]]}
+
+        graph_coord = np.stack((graphs["xx"], graphs["yy"]), axis = -1)
+        x_diff = graph_coord[:, :, None, 0] - graph_coord[:, None, :, 0]
+        y_diff = graph_coord[:, :, None, 1] - graph_coord[:, None, :, 1]
+        graphs["Distance_matrix"] = np.sqrt(x_diff**2 + y_diff**2)
+        
+        for var in self.Surfex_data:
+            graphs[var] = self.Surfex_data[var].flatten()[nninfo[2][valids]]
+            if "ISBA" in var:
+                graphs[var][graphs[var] > 1e10] = np.nan
+        for var in self.MEPS_data:
+            graphs[var] = self.MEPS_data[var].flatten()[nninfo[2][valids]]
+        for var in AMSR2_dataset:
+            if var != "N_obs":
+                graphs["AMSR2_" + var] = AMSR2_dataset[var][valids]
+        
+        return graphs
+
     def write_graphs(self, Graphs):
         path_output = self.paths["output"] + self.date_task[0:4] + "/" + self.date_task[4:6] + "/" + self.date_task[6:8] + "/" + self.date_task[9:11] + "/" + "03" + "/" + "%s"%self.mbr + "/"
-        print(path_output)
+        #print(path_output)
         if os.path.exists(path_output) == False:
             os.system("mkdir -p " + path_output) 
         filename = path_output + "Graphs_" + self.date_task + ".h5"
@@ -471,19 +498,34 @@ class extract_graphs():
                     hdf.create_dataset(var, data = var_conc) 
                 else:
                     hdf.create_dataset(var, data = Graphs[var])
-    #
+    
     def __call__(self):
-        Graphs = {}
+        graphs = {}
+        areadef = self.Surfex_coord["areadef"]
         for filename in self.dataset:
             hour_filename = int(filename[-29:-27])
             if hour_filename < self.max_hour:
+                tic = time.time()
                 AMSR2_dataset = read_AMSR2_data(filename, self.AMSR2_task_frequency)()
-                AMSR2_surfex_domain = self.AMSR2_on_surfex_domain(AMSR2_dataset)
-                if len(AMSR2_surfex_domain) > 0:
-                    print(filename)
-                    Distances_to_footprint_center =  self.calculate_distances(AMSR2_surfex_domain)
-                    Graphs = self.get_graph_data(Distances_to_footprint_center, AMSR2_surfex_domain)
-                    self.write_graphs(Graphs)
+                toc = time.time()
+                print("Time to read AMSR2 data: " + str(toc - tic) + " seconds")
+                tic = time.time()
+                obsdef = pyresample.geometry.SwathDefinition(lons = AMSR2_dataset["lon"], lats = AMSR2_dataset["lat"])
+                nninfo = pyresample.kd_tree.get_neighbour_info(areadef,
+                                                               obsdef,
+                                                               radius_of_influence=10000.0, # TODO set proper radius
+                                                               neighbours=self.static_dimension)
+                toc = time.time()
+                print("Time to get nearest neighbour info: " + str(toc - tic) + " seconds")
+                if len(AMSR2_dataset) > 0:
+                    #print(filename)
+                    tic = time.time()
+                    graphs = self.get_graph_data_nn(nninfo, AMSR2_dataset)
+                    toc = time.time()
+                    self.write_graphs(graphs)
+                    tac = time.time()
+                    print("Time to extract graphs: " + str(toc - tic) + " seconds")
+                    print("Time to write graphs: " + str(tac - toc) + " seconds")
 
 
 # # Data processing
@@ -495,7 +537,7 @@ def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadi
     SGE_TASK_ID = 1
     #
     date_min = date_start
-    date_max = date_stop 
+    date_max = date_stop
     #
     AMSR2_task_frequency = "18.7"
     AMSR2_frequencies = ["6.9", "7.3", "10.7", "18.7", "23.8", "36.5"]
@@ -505,7 +547,7 @@ def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadi
     paths["AMSR2"] = satpattern #"/lustre/storeB/immutable/archive/projects/remotesensing/satellite/"
     paths["MEPS"] = meps_pattern #"/lustre/storeB/immutable/archive/projects/metproduction/meps/"
     paths["surfex"] = hofxpattern #"/lustre/storeB/users/josteinbl/sfx_data/LDAS_NOR_LETKF/archive/"
-    paths["surfex_sfx"] = sfxpath 
+    paths["surfex_sfx"] = sfxpath
     paths["surfex_grid"] = pgdfile
     paths["output"] = anadir #"/lustre/storeB/users/josteinbl/sfx_data/LDAS_NOR_LETKF/archive/" #+ AMSR2_task_frequency.split('.')[0] + "GHz_static/"
     #
@@ -530,7 +572,7 @@ def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadi
     #
     n_soil_layers = 2
     n_snow_layers = 12
-    surfex_soil_variables = ["TG", "WSN_VEG", "WG", "WGI", "RSN_VEG", "SNOWTEMP", "SNOWLIQ", "HSN_VEG"] 
+    surfex_soil_variables = ["TG", "WSN_VEG", "WG", "WGI", "RSN_VEG", "SNOWTEMP", "SNOWLIQ", "HSN_VEG"]
     #
     for var in surfex_soil_variables:
         if ("SNOW" in var) or ("_VEG" in var):
@@ -555,41 +597,80 @@ def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadi
  #   mbrs = ["003"]#, "001"]#,"002","003","004","005","006","007","008", "009"]
     #MEPS_data = get_MEPS_data(date_task, MEPS_leadtime, MEPS_dim_variables, MEPS_PL_variables, Surfex_coord, crs, paths)()        
     MEPS_data = {}
-
+    tic = time.time()
     Surfex_data = read_surfex_data(date_task_hours_AMSR2, paths, predictor_variables, mbr)
-    Surfex_data["WSN_T_ISBA"] = calculate_WSN_T_ISBA(Surfex_data, n_soil_layers)
-    Surfex_data["FRAC_LAND_AND_SEA_WATER"] = Surfex_data["FRAC_WATER"] + Surfex_data["FRAC_SEA"] 
+    toc = time.time()
+    print("Time to read surfex data: " + str(toc - tic) + " seconds")
+    tic = time.time()
+    Surfex_data["WSN_T_ISBA"] = calculate_WSN_T_ISBA(Surfex_data, n_snow_layers)
+    toc = time.time()
+    print("Time to calculate WSN_T_ISBA: " + str(toc - tic) + " seconds")
+    Surfex_data["FRAC_LAND_AND_SEA_WATER"] = Surfex_data["FRAC_WATER"] + Surfex_data["FRAC_SEA"]
     Surfex_data["SNOW_GRADIENT"] = (Surfex_data["SNOWTEMP12_ga"] - Surfex_data["SNOWTEMP1_ga"]) / Surfex_data["DSN_T_ISBA"]
     Surfex_data["SNOW_GRADIENT"][Surfex_data["SNOW_GRADIENT"] > 50] = 50
     Surfex_data["SNOW_GRADIENT"][Surfex_data["SNOW_GRADIENT"] < -50] = -50
     for var in Surfex_PGD:
         Surfex_data[var] = Surfex_PGD[var]
     
-    extract_graphs(date_task = date_task, 
-                   paths = paths, 
-                   AMSR2_task_frequency = AMSR2_task_frequency, 
+    extract_graphs(date_task = date_task,
+                   paths = paths,
+                   AMSR2_task_frequency = AMSR2_task_frequency,
                    static_dimension = static_dimension,
                    crs = crs,
-                   Surfex_coord = Surfex_coord, 
+                   Surfex_coord = Surfex_coord,
                    Surfex_data = Surfex_data,
                    MEPS_data = MEPS_data,
                    mbr = mbr)()
-    #
+    
+    
     tf = time.time()
     print("Computing time: ", tf - t0)
 
+
+def replace(pattern, translation):
+    """Replace all occurrences of a pattern in a string with the given reanslation."""
+    for key, value in translation.items():
+        pattern = pattern.replace(key, value)
+    return pattern
+
+
 def main():
 
-
-    #makeData(mbr)
+    dt0 = datetime.datetime(2022, 7, 19, 6, 0)
+    dtprev = dt0 - datetime.timedelta(hours = 3)
+    mbr = "003"
+    date_start = dt0.strftime("%Y%m%d")
+    date_stop = date_start
+    sfx_exp_data = "/scratch/sbjb/sfx_data/CERISE_Land_Pv2_dev01/"
+    pgdfile = sfx_exp_data + "climate/PGD.nc"
+    satpattern = "/ec/res4/scratch/sbjb/Projects/CERISE/observations/amsr2/"
+    tr = {
+        "@YYYY@": dtprev.strftime("%Y"),
+        "@MM@": dtprev.strftime("%m"),
+        "@DD@": dtprev.strftime("%d"),
+        "@HH@": dtprev.strftime("%H"),
+        "@YYYY_LL@": date_start[0:4],
+        "@MM_LL@": date_start[4:6],
+        "@DD_LL@": date_start[6:8],
+        "@HH_LL@": dt0.strftime("%H"),
+        "@RRR@": "003"
+    }    
+    hofxpattern = replace(sfx_exp_data + "archive/@YYYY@/@MM@/@DD@/@HH@/@RRR@/SURFOUT.@YYYY_LL@@MM_LL@@DD_LL@_@HH_LL@h00.nc", tr)
+    anadir = "/scratch/fab0/Projects/cerise/hofx_test/"
+    meps_pattern = replace("https://thredds.met.no/thredds/dodsC/aromearcticarchive/@YYYY@/@MM@/@DD@/arome_arctic_det_2_5km_@YYYY@@MM@@DD@T@HH@Z.nc",tr)
+    sfxpath = replace(sfx_exp_data + "/archive/@YYYY@/@MM@/@DD@/@HH@/@RRR@/SURFOUT.nc", tr)
+    
+    makeData(mbr,
+             date_start,
+             date_stop,
+             pgdfile,
+             satpattern,
+             hofxpattern,
+             anadir,
+             meps_pattern,
+             sfxpath
+             )
 
 if __name__ == "__main__":
 
-    main()    
-
-
-# In[ ]:
-
-
-
-
+    main()
