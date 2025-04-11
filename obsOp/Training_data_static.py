@@ -512,7 +512,7 @@ class extract_graphs():
 
 # Data processing
 
-def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadir, meps_pattern, sfxpath):
+def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadir, sfxpath):
 
     # Constants
     
@@ -528,7 +528,7 @@ def makeData(mbr, date_start, date_stop, pgdfile, satpattern, hofxpattern, anadi
     
     paths = {}
     paths["AMSR2"] = satpattern 
-    paths["MEPS"] = meps_pattern 
+    paths["MEPS"] = ""#meps_pattern 
     paths["surfex"] = hofxpattern 
     paths["surfex_sfx"] = sfxpath 
     paths["surfex_grid"] = pgdfile

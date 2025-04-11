@@ -137,6 +137,9 @@ class make_loader():
             
             Graphs_coord["xx"] = hdf["AMSR2_xx"][()]
             Graphs_coord["yy"] = hdf["AMSR2_yy"][()]
+            Graphs_coord["lat"] = hdf["AMSR2_lat"][()]
+            Graphs_coord["lon"] = hdf["AMSR2_lon"][()]
+            
             Targets["AMSR2_BT" + self.AMSR2_frequency + "H"] = hdf["AMSR2_BT" + self.AMSR2_frequency + "H"][()]
             Targets["AMSR2_BT" + self.AMSR2_frequency + "V"] = hdf["AMSR2_BT" + self.AMSR2_frequency + "V"][()]
             
@@ -292,8 +295,87 @@ class gridding_predictions():
             Outputs["Distance_to_footprint_center"][:,:] = np.copy(Gridded_distance)
     
     def __call__(self):
+
         Gridded_predictions, Gridded_targets, Gridded_distance = self.project_predictions_onto_Surfex_domain()
-        self.write_netCDF(Gridded_predictions, Gridded_targets, Gridded_distance)
+        self.write_netCDF_1D(Gridded_predictions, Gridded_targets, Gridded_distance)
+
+class output_predictions_1D():
+
+    def __init__(self, date_task, AMSR2_footprint_radius, Surfex_coord, list_targets, Targets, Graphs_coord, predictions, paths, mbr):
+        self.date_task = date_task
+        self.AMSR2_footprint_radius = AMSR2_footprint_radius 
+        self.Surfex_coord = Surfex_coord
+        self.list_targets = list_targets
+        self.idx_nan = np.logical_or(np.isnan(Graphs_coord["xx"]) == True, np.isnan(Graphs_coord["yy"]) == True)        
+        self.idx_nan_extend = np.repeat(np.expand_dims(self.idx_nan, axis = 1), len(self.list_targets), axis = 1)
+        self.Targets = Targets
+        for var in self.Targets:
+            self.Targets[var] = self.Targets[var][self.idx_nan == False]
+        self.Graphs_xx = Graphs_coord["xx"][self.idx_nan == False]
+        self.Graphs_yy = Graphs_coord["yy"][self.idx_nan == False]        
+        self.Graphs_coord = Graphs_coord
+        
+        self.predictions = predictions                
+        self.paths = paths
+        self.mbr = mbr
+    #
+    def nearest_neighbor_indexes(self):
+        pred_xx = np.expand_dims(self.Graphs_xx, axis = 1)
+        pred_yy = np.expand_dims(self.Graphs_yy, axis = 1)
+        Surfex_xx = np.expand_dims(np.ndarray.flatten(self.Surfex_coord["xx"]), axis = 1)
+        Surfex_yy = np.expand_dims(np.ndarray.flatten(self.Surfex_coord["yy"]), axis = 1)        
+        coord_input = np.concatenate((pred_xx, pred_yy), axis = 1)
+        coord_output = np.concatenate((Surfex_xx, Surfex_yy), axis = 1)
+        tree = scipy.spatial.KDTree(coord_input)
+        dist, idx = tree.query(coord_output)
+        return(dist, idx)
+    
+    def write_netCDF_1D(self, predictions, targets):
+        
+        path_output = self.paths["output"]
+        if os.path.exists(path_output) == False:
+            os.system("mkdir -p " + path_output)
+        output_filename = path_output + "Predictions_" + self.date_task + ".nc"
+        if os.path.isfile(output_filename):
+            os.system("rm " + output_filename)
+        
+        with netCDF4.Dataset(str(output_filename), "w", format = "NETCDF4") as output_netcdf:
+            
+            Nobs = output_netcdf.createDimension("Nobs", np.shape(predictions)[0])            
+            Outputs = vars()            
+            
+            for var in ["lat", "lon"]:
+                Outputs[var] = output_netcdf.createVariable(var, "d", ("Nobs"))
+                if var == "lat":
+                    Outputs[var].standard_name = "latitude"
+                    Outputs[var].unit = "degrees_north"
+                else:
+                    Outputs[var].standard_name = "longitude"
+                    Outputs[var].units = "degrees_east"
+                Outputs[var][:] = np.copy(self.Graphs_coord[var])
+            
+            for var in self.Targets:
+                print(var)
+                Outputs["Target_" + var] = output_netcdf.createVariable("Target_" + var, "d", ("Nobs"))
+                Outputs["Target_" + var].units = "Kelvins"
+                Outputs["Target_" + var].standard_name = "Brightness temperature"
+                Outputs["Target_" + var][:] = np.copy(self.Targets[var])
+            
+            for var in self.list_targets:
+                print(var)
+                if var == "AMSR2_BT18.7H":
+                    ii = 0
+                else:
+                    ii = 1
+                Outputs["Prediction_" + var] = output_netcdf.createVariable("Prediction_" + var, "d", ("Nobs"))
+                Outputs["Prediction_" + var].units = "Kelvins"
+                Outputs["Prediction_" + var].standard_name = "Brightness temperature"                
+                Outputs["Prediction_" + var][:] = np.copy(self.predictions[:,ii])
+                #print(np.shape(Gridded_predictions[var]))                        
+    
+    def __call__(self):
+
+        self.write_netCDF_1D(self.predictions, self.Targets)
 
 def run_GNN(mbr, dtg_start, dtg_stop, anadir, pgdfile, normdir, modeldir):
 
@@ -397,15 +479,26 @@ def run_GNN(mbr, dtg_start, dtg_stop, anadir, pgdfile, normdir, modeldir):
             print("shape predictions")
             print(np.shape(predictions))
 
-            gridding_predictions(date_task = date_task, 
-                                AMSR2_footprint_radius = AMSR2_footprint_radius,
-                                Surfex_coord = Surfex_coord, 
-                                list_targets = model_params["list_targets"], 
-                                Targets = Targets, 
-                                Graphs_coord = Graphs_coord, 
-                                predictions = predictions, 
-                                paths = paths,
-                                mbr = mbr)()
+            output_predictions_1D(date_task = date_task, 
+                    AMSR2_footprint_radius = AMSR2_footprint_radius,
+                    Surfex_coord = Surfex_coord, 
+                    list_targets = model_params["list_targets"], 
+                    Targets = Targets, 
+                    Graphs_coord = Graphs_coord, 
+                    predictions = predictions, 
+                    paths = paths,
+                    mbr = mbr)()
+
+            # TODO add switch 2D or 1D output fields
+            #gridding_predictions(date_task = date_task, 
+            #                    AMSR2_footprint_radius = AMSR2_footprint_radius,
+            #                    Surfex_coord = Surfex_coord, 
+            #                    list_targets = model_params["list_targets"], 
+            #                    Targets = Targets, 
+            #                    Graphs_coord = Graphs_coord, 
+            #                    predictions = predictions, 
+            #                    paths = paths,
+            #                    mbr = mbr)()
         #except:
         #   pass
     #
